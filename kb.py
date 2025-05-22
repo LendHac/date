@@ -17,9 +17,9 @@ import time
 import asyncio
 from main import bot
 from datetime import date
-
-   
-
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
+import json
+from g4f.client import Client
 
 days_of_week = {
     0: 'Понедельник',
@@ -28,7 +28,7 @@ days_of_week = {
     3: 'Четверг',
     4: 'Пятница',
     5: 'Суббота',
-    6: 'Понедельник'
+    6: 'Воскресенье'
 }
 
 file_loc = 'sheldure.xlsx'
@@ -37,18 +37,18 @@ data =df.iloc[[4]]
 but = data.values.flatten()
 
 def split_subjects(subject):
-    """Разделяет строку subject на subject и subject2, если есть аудитория."""
-    if not isinstance(subject, str):
-        return [{"subject": subject}]  # Если subject не строка, возвращаем как есть
     
-    parts = re.split(r'\n? ?Ауд\. \d+', subject)  # Разделяем по аудитории
+    if not isinstance(subject, str):
+        return [{"subject": subject}]  
+    
+    parts = re.split(r'\n? ?Ауд\. \d+', subject)  
     subjects = []
     
     for i, part in enumerate(parts):
         if i == 0:
-            subjects.append({"subject": part.strip()})  # Первый предмет
+            subjects.append({"subject": part.strip()})  
         else:
-            subjects.append({"subject2": part.strip()})  # Остальные предметы
+            subjects.append({"subject2": part.strip()})  
 
     return subjects
 
@@ -85,12 +85,12 @@ def get_schedule_for_today(excel_file, day_column, group_column):
                 else:
                     schedule_array.append({'time': time_slot, 'subject': subject})
 
-    # Определяем текущую неделю
+    
     current_date = date.today()
     week_number = current_date.isocalendar()[1]
     choice = 0 if week_number % 2 == 1 else 1  
 
-    # Формируем расписание с разделением предметов
+    
     schedule_list = []
     for entry in schedule_array:
         split_result = split_subjects(entry["subject"])
@@ -119,6 +119,44 @@ kb_router = Router()
 class quest(StatesGroup):    
     course = State()
     group = State()
+CONFIG_PATH = "config.json"
+class req(StatesGroup):    
+    req = State()
+
+with open(CONFIG_PATH, "r", encoding="utf-8") as file:
+    config = json.load(file)
+AUTHORIZED_USERS = config["authorized_users"]
+
+
+@kb_router.message(lambda message: message.text == "Профиль")
+async def profile(message: types.Message):
+    user_id = str(message.chat.id)
+    
+    if user_id in AUTHORIZED_USERS:
+        name = AUTHORIZED_USERS[user_id]["name"]
+        await message.answer(f"Ваш профиль:\nИмя: {name}\nID: {user_id}")
+    else:
+        await message.answer("Профиль не найден.")
+
+
+@kb_router.message(lambda message: message.text == "Сделать запрос")
+async def request_action(message: types.Message,state: FSMContext):
+    await message.answer("Введите ваш запрос: ")
+    await state.set_state(req.req)
+@kb_router.message(req.req)  
+async def process_request(message: types.Message, state: FSMContext):
+    await state.update_data(req=message.text)  
+    user_data = await state.get_data()
+    print(user_data['req'])
+    client = Client()
+    response = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[{"role": "user", "content":user_data['req'] }],
+        web_search=False
+    )
+    await message.answer(response.choices[0].message.content)
+
+
 
 
 @kb_router.callback_query(lambda c: c.data=='back')
@@ -148,7 +186,7 @@ def create_keyboard_group(course_id: int) -> InlineKeyboardMarkup:
     else:
         raise ValueError("а как ")
 
-    # Создаем кнопки для выбранного курса
+   
     for j in but[start_index:end_index]:
         button = InlineKeyboardButton(text=str(j), callback_data=j)
         buttons.append([button])
@@ -278,7 +316,7 @@ def schedule_jobs():
         schedule.run_pending()
         time.sleep(1)
 
-# Запуск планировщика в отдельном потоке
+
 threading.Thread(target=schedule_jobs, daemon=True).start()
 
 
